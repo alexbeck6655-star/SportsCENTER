@@ -1,33 +1,15 @@
-name: Local Odds Test
+# src/run_local_events_test.py
+import sys, json
+from pathlib import Path
 
-on:
-  workflow_dispatch: {}   # run it manually from the Actions tab
+print("✅ DK Events Test starting...")
 
-jobs:
-  run:
-    runs-on: ubuntu-latest
+# This is just a placeholder for now – in future we'll import dk_probe or dk_events
+fake_data = {
+    "status": "success",
+    "events_found": 0,
+    "note": "Replace with real DraftKings parsing later."
+}
 
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-
-      - name: Run DK events test
-        run: |
-          if [ -f src/run_local_events_test.py ]; then
-            python src/run_local_events_test.py
-          elif [ -f run_local_events_test.py ]; then
-            python run_local_events_test.py
-          else
-            echo "❌ Missing run_local_events_test.py (looked in ./ and ./src/)"
-            exit 1
-          fi
+print(json.dumps(fake_data, indent=2))
+print("✅ DK Events Test finished.")
