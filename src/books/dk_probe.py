@@ -1,113 +1,88 @@
 # src/books/dk_probe.py
-"""
-DraftKings connectivity probe (no odds logic yet).
-- Tries a few known public JSON endpoints used by the DK site.
-- Prints a short status line so we can verify we can reach DK.
-- No Playwright/JS yet: pure HTTP GET with a desktop User-Agent.
-"""
-
 from __future__ import annotations
-import json
-from typing import Dict, Any, Optional
-import sys
 import time
+import typing as t
+import requests
+from requests import Response
 
-try:
-    import requests  # type: ignore
-except Exception as e:
-    print("❌ requests not installed. Add it to requirements.txt")
-    raise
+# A very gentle "are you there?" probe for the NFL landing page.
+# This DOES NOT crawl or parse odds yet—just proves we can fetch a public page.
 
-UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
-)
+NFL_URL = "https://sportsbook.draftkings.com/leagues/football/nfl"
 
 HEADERS = {
-    "User-Agent": UA,
-    "Accept": "application/json,text/plain,*/*",
+    # Look like a real browser so we aren't insta-blocked
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://sportsbook.draftkings.com/",
-    "Connection": "keep-alive",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Connection": "close",
 }
 
-# Known event-group endpoints DK uses (IDs can change; we’ll try several).
-# These are harmless GETs; we’re just checking reachability + some JSON shape.
-CANDIDATES = [
-    # NFL event group (varies by season/region; we probe multiple).
-    "https://sportsbook.draftkings.com//sites/US-SB/api/v5/eventgroups/88670846?format=json",
-    "https://sportsbook.draftkings.com//sites/US-SB/api/v5/eventgroups/88808?format=json",
-    "https://sportsbook.draftkings.com//sites/US-SB/api/v5/eventgroups/84240?format=json",
-]
+class ProbeResult(t.TypedDict, total=False):
+    ok: bool
+    status: int
+    elapsed_ms: int
+    url: str
+    html_len: int
+    marker_hit: bool
+    note: str
 
-def _shorten(obj: Any, n: int = 600) -> str:
+def _marker_check(html: str) -> bool:
+    """
+    Very light fingerprint that tends to appear on DK pages without parsing JS.
+    We keep it loose so minor site tweaks don’t break this.
+    """
+    needles = [
+        "DraftKings",              # brand name
+        "sportsbook.draftkings",   # asset urls
+        "data-reactroot",          # React app root
+        "data-tracking-context",   # analytics attrs seen on league pages
+    ]
+    h = html[:50000]  # cap to first chunk for speed
+    return any(n.lower() in h.lower() for n in needles)
+
+def quick_probe(timeout_sec: float = 12.0) -> ProbeResult:
+    t0 = time.time()
     try:
-        s = json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
-    except Exception:
-        s = str(obj)
-    return (s[: n] + "…") if len(s) > n else s
+        resp: Response = requests.get(NFL_URL, headers=HEADERS, timeout=timeout_sec)
+        elapsed_ms = int((time.time() - t0) * 1000)
+        html = resp.text or ""
+        ok_basic = (200 <= resp.status_code < 300)
+        ok_marker = _marker_check(html)
+        return ProbeResult(
+            ok=ok_basic and ok_marker,
+            status=resp.status_code,
+            elapsed_ms=elapsed_ms,
+            url=str(resp.url),
+            html_len=len(html),
+            marker_hit=ok_marker,
+            note=("OK" if ok_basic else "Non-2xx") + (" + marker" if ok_marker else " (no marker)"),
+        )
+    except requests.exceptions.RequestException as e:
+        elapsed_ms = int((time.time() - t0) * 1000)
+        return ProbeResult(
+            ok=False,
+            status=-1,
+            elapsed_ms=elapsed_ms,
+            url=NFL_URL,
+            html_len=0,
+            marker_hit=False,
+            note=f"requests error: {type(e).__name__}: {e}",
+        )
 
-def quick_probe(timeout: float = 12.0) -> Dict[str, Any]:
-    session = requests.Session()
-    session.headers.update(HEADERS)
-
-    last_err: Optional[str] = None
-    for url in CANDIDATES:
-        try:
-            t0 = time.time()
-            r = session.get(url, timeout=timeout)
-            dt = time.time() - t0
-            status = r.status_code
-            ctype = r.headers.get("Content-Type", "")
-            note = f"status={status} time={dt:.2f}s ctype={ctype}"
-
-            if status != 200:
-                last_err = f"{url} -> {note}"
-                continue
-
-            # Try JSON first
-            data: Any = None
-            try:
-                data = r.json()
-            except Exception:
-                pass
-
-            if isinstance(data, dict) and ("eventGroup" in data or "eventGroupId" in _shorten(data, 200)):
-                # Count a few things if present
-                eg = data.get("eventGroup", {})
-                events = eg.get("events") or data.get("events") or []
-                categories = eg.get("offerCategories") or []
-                summary = {
-                    "events_count": len(events) if isinstance(events, list) else 0,
-                    "categories": [c.get("name") for c in categories[:5] if isinstance(c, dict)],
-                }
-                print(f"✅ DK JSON OK :: {note}")
-                print(f"• URL: {url}")
-                print(f"• Summary: {summary}")
-                # show a tiny sample of the first event id/name if available
-                if isinstance(events, list) and events:
-                    ev0 = events[0]
-                    sample = {k: ev0.get(k) for k in ("eventId", "name", "startDate")}
-                    print(f"• Sample event: {sample}")
-                else:
-                    print("• No events array visible (may be off-season or different group).")
-                return {"ok": True, "url": url, "note": note, "summary": summary}
-
-            # If JSON didn’t look right, at least show a snippet of text
-            txt = r.text
-            print(f"⚠️ DK responded but JSON shape unexpected :: {note}")
-            print(_shorten(txt, 500))
-            return {"ok": True, "url": url, "note": note, "summary": "unexpected-shape"}
-
-        except Exception as e:
-            last_err = f"{url} -> {type(e).__name__}: {e}"
-
-    print("❌ DK probe could not confirm a working endpoint.")
-    if last_err:
-        print(f"Last error: {last_err}")
-    return {"ok": False, "error": last_err or "unknown"}
-
-if __name__ == "__main__":
-    res = quick_probe()
-    # exit non-zero on failure so Actions shows red if we genuinely can’t reach DK
-    sys.exit(0 if res.get("ok") else 1)
+def pretty_line(res: ProbeResult) -> str:
+    emoji = "✅" if res.get("ok") else "❌"
+    return (
+        f"{emoji} DK probe — status={res.get('status')} "
+        f"elapsed={res.get('elapsed_ms')}ms "
+        f"html={res.get('html_len')} "
+        f"marker={res.get('marker_hit')} "
+        f"url={res.get('url')} "
+        f"note={res.get('note')}"
+    )
