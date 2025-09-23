@@ -3,86 +3,82 @@ from __future__ import annotations
 import time
 import typing as t
 import requests
-from requests import Response
-
-# A very gentle "are you there?" probe for the NFL landing page.
-# This DOES NOT crawl or parse odds yet—just proves we can fetch a public page.
+from bs4 import BeautifulSoup
 
 NFL_URL = "https://sportsbook.draftkings.com/leagues/football/nfl"
 
 HEADERS = {
-    # Look like a real browser so we aren't insta-blocked
+    # light, generic desktop UA + sec headers help avoid some bot walls
     "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
-    "Connection": "close",
+    "Accept-Language": "en-US,en;q=0.7",
+    "Upgrade-Insecure-Requests": "1",
+    "Connection": "keep-alive",
 }
 
-class ProbeResult(t.TypedDict, total=False):
-    ok: bool
-    status: int
-    elapsed_ms: int
-    url: str
-    html_len: int
-    marker_hit: bool
-    note: str
-
-def _marker_check(html: str) -> bool:
+def quick_probe(url: str = NFL_URL, timeout: float = 12.0) -> dict:
     """
-    Very light fingerprint that tends to appear on DK pages without parsing JS.
-    We keep it loose so minor site tweaks don’t break this.
+    Fetch the DK NFL page and return a small status dict.
+    Also extracts simple HTML facts (title, link counts) to prove parsing works.
     """
-    needles = [
-        "DraftKings",              # brand name
-        "sportsbook.draftkings",   # asset urls
-        "data-reactroot",          # React app root
-        "data-tracking-context",   # analytics attrs seen on league pages
-    ]
-    h = html[:50000]  # cap to first chunk for speed
-    return any(n.lower() in h.lower() for n in needles)
-
-def quick_probe(timeout_sec: float = 12.0) -> ProbeResult:
     t0 = time.time()
-    try:
-        resp: Response = requests.get(NFL_URL, headers=HEADERS, timeout=timeout_sec)
-        elapsed_ms = int((time.time() - t0) * 1000)
-        html = resp.text or ""
-        ok_basic = (200 <= resp.status_code < 300)
-        ok_marker = _marker_check(html)
-        return ProbeResult(
-            ok=ok_basic and ok_marker,
-            status=resp.status_code,
-            elapsed_ms=elapsed_ms,
-            url=str(resp.url),
-            html_len=len(html),
-            marker_hit=ok_marker,
-            note=("OK" if ok_basic else "Non-2xx") + (" + marker" if ok_marker else " (no marker)"),
-        )
-    except requests.exceptions.RequestException as e:
-        elapsed_ms = int((time.time() - t0) * 1000)
-        return ProbeResult(
-            ok=False,
-            status=-1,
-            elapsed_ms=elapsed_ms,
-            url=NFL_URL,
-            html_len=0,
-            marker_hit=False,
-            note=f"requests error: {type(e).__name__}: {e}",
-        )
+    r = requests.get(url, headers=HEADERS, timeout=timeout)
+    elapsed_ms = int((time.time() - t0) * 1000)
 
-def pretty_line(res: ProbeResult) -> str:
-    emoji = "✅" if res.get("ok") else "❌"
-    return (
-        f"{emoji} DK probe — status={res.get('status')} "
-        f"elapsed={res.get('elapsed_ms')}ms "
-        f"html={res.get('html_len')} "
-        f"marker={res.get('marker_hit')} "
-        f"url={res.get('url')} "
-        f"note={res.get('note')}"
-    )
+    ok = (r.status_code == 200 and r.text and "DraftKings" in r.text)
+    info: dict[str, t.Any] = {
+        "status": r.status_code,
+        "elapsed_ms": elapsed_ms,
+        "html_len": len(r.text),
+        "marker": ("DraftKings" in r.text),
+        "url": url,
+        "parsed": {},
+    }
+
+    if ok:
+        info["parsed"] = _parse_landing_snapshot(r.text)
+
+    return info
+
+def _parse_landing_snapshot(html: str) -> dict:
+    """
+    Super-lightweight HTML inspection:
+      - page <title>
+      - number of links
+      - count of 'event-ish' links (paths that look like game/event pages)
+      - a few sample links so we can see we're grabbing real anchors
+    NOTE: DK renders most odds client-side; with plain requests we won't see prices yet.
+    This is just to confirm we can navigate/parse safely.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    title = (soup.title.get_text(strip=True) if soup.title else "")
+
+    links = [a.get("href") for a in soup.find_all("a", href=True)]
+    # normalize relative links to help us eyeball them
+    norm_links: list[str] = []
+    for href in links:
+        if not href:
+            continue
+        if href.startswith("//"):
+            norm_links.append("https:" + href)
+        elif href.startswith("/"):
+            norm_links.append("https://sportsbook.draftkings.com" + href)
+        else:
+            norm_links.append(href)
+
+    # very rough filter for “looks like a game/event/team page”
+    eventish = [
+        u for u in norm_links
+        if any(p in u for p in ["/event/", "/game/", "/leagues/football/nfl/"])
+    ]
+
+    return {
+        "title": title,
+        "total_links": len(norm_links),
+        "eventish_links": len(eventish),
+        "sample_eventish": eventish[:5],
+    }
