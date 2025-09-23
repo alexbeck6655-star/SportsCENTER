@@ -1,0 +1,19 @@
+name: Local Odds Test
+
+on:
+  workflow_dispatch:  # lets you trigger it manually
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run local test
+        run: python run_local_test.py
