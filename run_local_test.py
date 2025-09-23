@@ -1,9 +1,12 @@
-# run_local_test.py (temporary: call DK probe)
+# run_local_test.py
 import sys
-sys.path.append("src")
+sys.path.append("src")      # allow imports from src/
 
-from books.dk_probe import quick_probe
+from books.dk_probe import quick_probe, pretty_line
 
-print("🔎 Running DraftKings connectivity probe…")
+print("🧪 SportsCENTER smoke test running…")
+
 res = quick_probe()
-print("Done.")
+print(pretty_line(res))
+
+print("🔚 Test finished.")
