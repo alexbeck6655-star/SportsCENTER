@@ -1,15 +1,20 @@
-# src/run_local_events_test.py
-import sys, json
-from pathlib import Path
+import requests
+from bs4 import BeautifulSoup
+import json
 
-print("✅ DK Events Test starting...")
+print("DK Events Test starting...")
 
-# This is just a placeholder for now – in future we'll import dk_probe or dk_events
-fake_data = {
-    "status": "success",
-    "events_found": 0,
-    "note": "Replace with real DraftKings parsing later."
-}
+url = "https://sportsbook.draftkings.com/leagues/football/nfl"
+response = requests.get(url)
+if response.status_code != 200:
+    print(json.dumps({"status": "fail", "error": f"HTTP {response.status_code}"}))
+else:
+    soup = BeautifulSoup(response.text, "html.parser")
+    title = soup.title.string if soup.title else "No title found"
+    print(json.dumps({
+        "status": "success",
+        "page_title": title,
+        "html_length": len(response.text)
+    }))
 
-print(json.dumps(fake_data, indent=2))
-print("✅ DK Events Test finished.")
+print("DK Events Test finished.")
