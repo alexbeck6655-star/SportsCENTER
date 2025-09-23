@@ -1,23 +1,19 @@
+# run_local_events_test.py
 import sys
-sys.path.append("src")  # allow imports from src/
+sys.path.append("src")  # allow "from books..." imports
 
-from books.dk_probe import quick_probe  # type: ignore
+from books.dk_events import fetch_events
 
-print("🏁 SportsCENTER smoke test (parse check)…")
+print("▶ DK Events test starting…")
+events = fetch_events()
 
-info = quick_probe()
-print(f"✅ DK probe — status={info['status']} elapsed={info['elapsed_ms']}ms "
-      f"html={info['html_len']:,} marker={info['marker']} url={info['url']}")
+if not events:
+    print("⚠ No events found (could be DK layout/time window).")
+else:
+    print(f"✅ Found {len(events)} DK events. Showing first 10:")
+    for e in events[:10]:
+        teams = e.get("teams") or "(no label)"
+        link = e.get("link")
+        print(f" • {teams}  ->  {link}")
 
-parsed = info.get("parsed", {}) or {}
-print(f"🔎 Title: {parsed.get('title','(none)')}")
-print(f"🔗 Links found: {parsed.get('total_links',0)} | "
-      f"event-ish: {parsed.get('eventish_links',0)}")
-
-samples = parsed.get("sample_eventish", [])
-if samples:
-    print("🧪 Sample event-ish links:")
-    for u in samples:
-        print("   •", u)
-
-print("✅ Test finished.")
+print("✓ Test finished.")
