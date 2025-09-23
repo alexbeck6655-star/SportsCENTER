@@ -1,13 +1,9 @@
-print("✅ SportsCENTER is working!")
-print("Here is a fake odds snapshot just to prove output works:")
+# run_local_test.py (temporary: call DK probe)
+import sys
+sys.path.append("src")
 
-# Fake example data for testing
-games = [
-    {"matchup": "Jets vs Patriots", "player": "Breece Hall", "odds": "+120"},
-    {"matchup": "Eagles vs Cowboys", "player": "A.J. Brown", "odds": "-105"},
-]
+from books.dk_probe import quick_probe
 
-for game in games:
-    print(f"{game['matchup']} | {game['player']} Anytime TD: {game['odds']}")
-
-print("✅ Test finished successfully.")
+print("🔎 Running DraftKings connectivity probe…")
+res = quick_probe()
+print("Done.")
