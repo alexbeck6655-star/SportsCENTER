@@ -5,29 +5,28 @@ DK_URL = "https://sportsbook.draftkings.com/leagues/football/nfl"
 
 def fetch_events():
     """
-    Scrapes the DraftKings NFL page for available games and event links.
+    Scrapes DraftKings NFL page for available games and event links.
     Returns a list of dicts: [{"teams": "Jets vs Patriots", "link": "..."}]
     """
     try:
         r = requests.get(DK_URL, timeout=10)
         r.raise_for_status()
     except Exception as e:
-        print(f"[ERROR] Could not fetch DK page: {e}")
-        return []
+        return {"status": "error", "error": str(e), "events": []}
 
     soup = BeautifulSoup(r.text, "html.parser")
     events = []
 
-    # Look for all game links
+    # Look for all game links containing "/event/"
     for a in soup.find_all("a", href=True):
-        if "/event/" in a["href"]:  # Event links contain /event/
+        if "/event/" in a["href"]:
             teams = a.get_text(strip=True)
-            events.append({"teams": teams, "link": a["href"]})
+            link = f"https://sportsbook.draftkings.com{a['href']}"
+            events.append({"teams": teams, "link": link})
 
-    print(f"[INFO] Found {len(events)} events")
-    return events
+    return {"status": "success", "events_found": len(events), "events": events}
+
 
 if __name__ == "__main__":
-    events = fetch_events()
-    for e in events:
-        print(f"{e['teams']} -> {e['link']}")
+    result = fetch_events()
+    print(result)
