@@ -1,42 +1,33 @@
-import requests
-import re
-import json
+import requests, json
 from bs4 import BeautifulSoup
 
 DK_URL = "https://sportsbook.draftkings.com/leagues/football/nfl"
 
 def fetch_events():
-    """
-    Fetch NFL events from DraftKings by parsing the embedded dehydratedState JSON.
-    Returns a list of {teams, link} dicts.
-    """
     try:
         r = requests.get(DK_URL, timeout=10)
         r.raise_for_status()
     except Exception as e:
-        print(f"[ERROR] Could not fetch DK page: {e}")
-        return []
+        return {"status": "error", "error": str(e), "events": []}
 
-    # Search for the dehydratedState JSON blob
-    match = re.search(r'"dehydratedState":({.*?}),"app"', r.text)
-    if not match:
+    soup = BeautifulSoup(r.text, "html.parser")
+    script = soup.find("script", string=lambda s: s and "DEHYDRATED_STATE" in s)
+    if not script:
         print("[WARN] Could not find dehydratedState JSON in HTML")
-        return []
+        return {"status": "success", "events_found": 0, "events": []}
 
     try:
-        data = json.loads(match.group(1))
+        # Extract JSON part from script contents
+        json_text = script.string.split("=", 1)[1].strip(" ;")
+        data = json.loads(json_text)
     except Exception as e:
-        print(f"[ERROR] Could not parse JSON: {e}")
-        return []
+        return {"status": "error", "error": f"JSON parse failed: {e}", "events": []}
 
     events = []
-    for item in data.get("apolloState", {}).values():
-        if isinstance(item, dict) and item.get("__typename") == "Event":
-            name = item.get("name")
-            url = item.get("eventUrl")
-            if name and url:
-                events.append({"teams": name, "link": f"https://sportsbook.draftkings.com{url}"})
+    for key, value in data.items():
+        if isinstance(value, dict) and "eventId" in value:
+            teams = value.get("name", "")
+            link = value.get("link", "")
+            events.append({"teams": teams, "link": link})
 
-    print(f"[INFO] Found {len(events)} events")
-    return events
-
+    return {"status": "success", "events_found": len(events), "events": events}
