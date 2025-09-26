@@ -1,87 +1,40 @@
-#!/usr/bin/env python3
-"""
-Local DK events smoke test.
-
-- Imports books.dk_events.fetch_events()
-- Runs it (works whether it's sync or async)
-- Prints a compact JSON summary so you can see if events are being found
-"""
-
-from __future__ import annotations
-
-import os
-import sys
+# src/run_local_events_test.py
 import json
-import asyncio
-import inspect
-from typing import Any, Dict, List
+from books import dk_events
 
-# --- make "src/" imports work whether the runner cwd is repo root or src/ ---
-HERE = os.path.dirname(__file__)
-ROOT = os.path.abspath(os.path.join(HERE, ".."))
-if HERE not in sys.path:
-    sys.path.append(HERE)
-if ROOT not in sys.path:
-    sys.path.append(ROOT)
-
-# ---- import the DK fetcher ----
-try:
-    from books.dk_events import fetch_events  # type: ignore
-except Exception as e:
-    print("DK Events Test starting...")
-    print(json.dumps({
-        "status": "import_error",
-        "error": f"could not import books.dk_events.fetch_events: {e}"
-    }, ensure_ascii=False))
-    raise SystemExit(1)
-
-
-def _run_maybe_async(fn):
-    """Call fn() whether it's sync or async, and return the result."""
-    if inspect.iscoroutinefunction(fn):
-        return asyncio.run(fn())
-    # If the module gave us a *callable* object that returns a coroutine, catch that too.
-    result = fn()
-    if inspect.iscoroutine(result):
-        return asyncio.run(result)
-    return result
-
-
-def main() -> None:
+def main():
     print("DK Events Test starting...")
 
-    # how many events to preview in the log; override with env var if you want
-    try:
-        preview_n = int(os.getenv("PREVIEW_N", "3"))
-    except ValueError:
-        preview_n = 3
+    payload = dk_events.fetch_events()
 
-    try:
-        # Expectation: fetch_events() returns a dict with at least:
-        #   {"page_title": str, "events": List[Dict[str, Any]]}
-        payload: Dict[str, Any] = _run_maybe_async(fetch_events)
-    except Exception as e:
-        print(json.dumps({
-            "status": "fetch_error",
-            "error": f"{type(e).__name__}: {e}"
-        }, ensure_ascii=False))
-        raise SystemExit(1)
+    # Handle empty or None payload
+    if not payload:
+        print(json.dumps({"status": "success", "events_found": 0, "events": []}, indent=2))
+        print("DK Events Test finished.")
+        return
 
-    # Normalize structure defensively
-    page_title = payload.get("page_title") or payload.get("title") or ""
-    events: List[Dict[str, Any]] = payload.get("events") or []
+    # If payload is a dictionary (single response object)
+    if isinstance(payload, dict):
+        page_title = payload.get("page_title", "")
+        events = payload.get("events", [])
+    # If payload is a list (list of events)
+    elif isinstance(payload, list):
+        page_title = f"{len(payload)} events found"
+        events = payload
+    else:
+        page_title = "Unknown payload type"
+        events = []
 
-    summary = {
+    # Print summary
+    result = {
         "status": "success",
         "page_title": page_title,
         "events_found": len(events),
-        # only preview the first N in the console to keep logs short
-        "events_preview": events[:preview_n],
+        "events_preview": events[:3]  # show first 3 events for debugging
     }
 
-    print(json.dumps(summary, ensure_ascii=False))
+    print(json.dumps(result, indent=2))
     print("DK Events Test finished.")
-
 
 if __name__ == "__main__":
     main()
